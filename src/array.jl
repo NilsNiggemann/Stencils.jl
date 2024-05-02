@@ -109,7 +109,7 @@ end
 end
 
 """
-    getneighbor(A::AbstractStencilArray, I::CartesianIndex)
+    getneighbor(A::AbstractStencilArray, I::Tuple)
 
 Get an array value from a stencil neighborhood.
 
@@ -118,15 +118,21 @@ This method handles boundary conditions.
 @inline function getneighbor(A::AbstractStencilArray, I::Tuple)
     getneighbor(A, boundary(A), padding(A), I)
 end
+
 # `Conditional` needs handling for specific boundary conditions.
 # For Wrap we swap the side.
-@inline function getneighbor(
-    A::AbstractStencilArray{S,R}, ::Wrap, pad::Conditional, I::Tuple
-) where {S,R}
+function get_wrappend_inds(A::AbstractStencilArray{S,R}, I::Tuple) where {S,R}
     sz = tuple_contents(S)
     wrapped_inds = map(I, sz) do i, s
         i < 1 ? i + s : (i > s ? i - s : i)
     end
+    return wrapped_inds
+end
+
+@inline function getneighbor(
+    A::AbstractStencilArray{S,R}, ::Wrap, pad::Conditional, I::Tuple
+) where {S,R}
+    wrapped_inds = get_wrappend_inds(A, I)
     return unsafe_getindex(A, pad, wrapped_inds...)
 end
 # For Remove we use padval if out of bounds
@@ -143,6 +149,37 @@ end
     unsafe_getindex(A, pad, I...)
 end
 
+"""
+setneighbor!(A::AbstractStencilArray,val, I::Tuple)
+
+Set an array value from a stencil neighborhood to value `val` .
+
+This method handles boundary conditions.
+"""
+@inline function setneighbor!(A::AbstractStencilArray, val, I::Tuple)
+    setneighbor!(A, val, boundary(A), padding(A), I)
+end
+@inline function setneighbor!(
+    A::AbstractStencilArray{S,R},val, ::Wrap, pad::Conditional, I::Tuple
+) where {S,R}
+    wrapped_inds = get_wrappend_inds(A, I)
+    return unsafe_setneighbor!(A, val, pad, wrapped_inds...)
+end
+@inline function setneighbor!(A::AbstractStencilArray, val, ::Remove, ::Conditional, I::Tuple)
+    if checkbounds(Bool, A, I...) 
+        @inbounds A[I...] = val
+    end
+    return A # since unsafe_setindex! usually returns the array
+end
+
+@inline function unsafe_setneighbor!(A::AbstractStencilArray, val, I::Tuple)
+    unsafe_setneighbor!(A, val, boundary(A), padding(A), I)
+end
+@inline function unsafe_setneighbor!(
+    A::AbstractStencilArray{<:Any,R}, val, ::BoundaryCondition, pad::Padding, I::Tuple
+) where R
+    unsafe_setindex!(A,val, pad, I...)
+end
 # update_boundary!
 # Reset or wrap boundary where required. This allows us to ignore
 # bounds checks on stencils and still use a wraparound grid.
